@@ -11,7 +11,7 @@
 
 <meta name="author" content="Prana" />
 
-<meta name="date" content="2025-04-27" />
+<meta name="date" content="2025-05-03" />
 
 <title>ARMA_Modeling_and_Residual_Analysis_All_Stocks..R</title>
 
@@ -352,20 +352,20 @@ display: none;
 
 <h1 class="title toc-ignore">ARMA_Modeling_and_Residual_Analysis_All_Stocks..R</h1>
 <h4 class="author">Prana</h4>
-<h4 class="date">2025-04-27</h4>
+<h4 class="date">2025-05-03</h4>
 
 </div>
 
 
-<pre class="r"><code># Load libraries
-library(tseries)</code></pre>
+<pre class="r"><code># Load required libraries for time series modeling and diagnostics
+library(tseries)     # For time series tests like ADF</code></pre>
 <pre><code>## Warning: package &#39;tseries&#39; was built under R version 4.3.3</code></pre>
 <pre><code>## Registered S3 method overwritten by &#39;quantmod&#39;:
 ##   method            from
 ##   as.zoo.data.frame zoo</code></pre>
-<pre class="r"><code>library(forecast)</code></pre>
+<pre class="r"><code>library(forecast)    # For ARIMA model fitting</code></pre>
 <pre><code>## Warning: package &#39;forecast&#39; was built under R version 4.3.3</code></pre>
-<pre class="r"><code>library(lmtest)</code></pre>
+<pre class="r"><code>library(lmtest)      # For Box-Ljung test</code></pre>
 <pre><code>## Warning: package &#39;lmtest&#39; was built under R version 4.3.3</code></pre>
 <pre><code>## Loading required package: zoo</code></pre>
 <pre><code>## Warning: package &#39;zoo&#39; was built under R version 4.3.3</code></pre>
@@ -374,25 +374,25 @@ library(tseries)</code></pre>
 <pre><code>## The following objects are masked from &#39;package:base&#39;:
 ## 
 ##     as.Date, as.Date.numeric</code></pre>
-<pre class="r"><code>library(FinTS)</code></pre>
+<pre class="r"><code>library(FinTS)       # For ARCH test (heteroskedasticity)</code></pre>
 <pre><code>## Warning: package &#39;FinTS&#39; was built under R version 4.3.3</code></pre>
 <pre><code>## 
 ## Attaching package: &#39;FinTS&#39;</code></pre>
 <pre><code>## The following object is masked from &#39;package:forecast&#39;:
 ## 
 ##     Acf</code></pre>
-<pre class="r"><code># Read the data
+<pre class="r"><code># Load pre-processed log-return data for multiple stocks
 data &lt;- read.csv(&quot;all_log_returns_wide_format.csv&quot;)
 
-# List of all stock names
+# Identify all unique stock names (each row is a stock, columns are returns)
 stock_list &lt;- unique(data$Stock)
 
-# Create folder to save plots if not exist
+# Create a directory to save diagnostic plots if it doesn&#39;t already exist
 if (!dir.exists(&quot;Stock_Plots&quot;)) {
   dir.create(&quot;Stock_Plots&quot;)
 }
 
-# Initialize result storage
+# Initialize a dataframe to store model comparison results for each stock
 results_summary &lt;- data.frame(
   Stock = character(),
   Best_Model = character(),
@@ -405,79 +405,86 @@ results_summary &lt;- data.frame(
   stringsAsFactors = FALSE
 )
 
-# Process each stock one-by-one
+# Loop through each stock and perform ARMA modeling and diagnostics
 for (stock in stock_list) {
   cat(&quot;\nProcessing:&quot;, stock, &quot;\n&quot;)
   
-  # Step 1: Extract stock returns
+  # Extract the return series for the current stock
   stock_row &lt;- data[data$Stock == stock, ]
   if (nrow(stock_row) == 0) next
-  stock_returns &lt;- as.numeric(stock_row[,-1])
+  stock_returns &lt;- as.numeric(stock_row[,-1])  # Remove stock name column
+  
+  # Skip if all values are NA
   if (all(is.na(stock_returns))) {
-    cat(&quot;Skipping&quot;, stock, &quot;(all NA)\n&quot;)
+    cat(&quot;Skipping&quot;, stock, &quot;(all NA values)\n&quot;)
     next
   }
   
-  # Step 2: Split into training and testing
+  # Define training and test split (last 80 points reserved for future validation)
   test_size &lt;- 80
   n &lt;- length(stock_returns)
   if (n &lt;= test_size + 20) {
-    cat(&quot;Skipping&quot;, stock, &quot;(not enough data)\n&quot;)
+    cat(&quot;Skipping&quot;, stock, &quot;(insufficient data)\n&quot;)
     next
   }
   train_data &lt;- stock_returns[1:(n - test_size)]
-  test_data &lt;- stock_returns[(n - test_size + 1):n]
   
-  # Step 3: Plot ACF and PACF for training data
-  png(filename=paste0(&quot;Stock_Plots/&quot;, stock, &quot;_ACF_PACF.png&quot;))
-  par(mfrow=c(1,2))
-  acf(train_data, main=paste(&quot;ACF -&quot;, stock))
-  pacf(train_data, main=paste(&quot;PACF -&quot;, stock))
+  # Plot and save ACF/PACF for visual stationarity checks
+  png(filename = paste0(&quot;Stock_Plots/&quot;, stock, &quot;_ACF_PACF.png&quot;))
+  par(mfrow = c(1, 2))
+  acf(train_data, main = paste(&quot;ACF -&quot;, stock))
+  pacf(train_data, main = paste(&quot;PACF -&quot;, stock))
   dev.off()
   
-  # Step 4: Fit ARMA models
-  model_17_2 &lt;- tryCatch(arima(train_data, order = c(17,0,2)), error = function(e) NULL)
-  model_12_3 &lt;- tryCatch(arima(train_data, order = c(12,0,3)), error = function(e) NULL)
-  model_7_4  &lt;- tryCatch(arima(train_data, order = c(7,0,4)), error = function(e) NULL)
+  # Fit 3 candidate ARMA models with varying complexity
+  model_17_2 &lt;- tryCatch(arima(train_data, order = c(17, 0, 2)), error = function(e) NULL)
+  model_12_3 &lt;- tryCatch(arima(train_data, order = c(12, 0, 3)), error = function(e) NULL)
+  model_7_4  &lt;- tryCatch(arima(train_data, order = c(7, 0, 4)), error = function(e) NULL)
   
+  # Skip if any model fails to converge
   if (is.null(model_17_2) | is.null(model_12_3) | is.null(model_7_4)) {
     cat(&quot;Skipping&quot;, stock, &quot;(model fitting failed)\n&quot;)
     next
   }
   
-  # Step 5: Compare AICs
+  # Compare AIC scores and select the best-fitting model
   aics &lt;- c(AIC(model_17_2), AIC(model_12_3), AIC(model_7_4))
   names(aics) &lt;- c(&quot;ARMA(17,2)&quot;, &quot;ARMA(12,3)&quot;, &quot;ARMA(7,4)&quot;)
   best_model_name &lt;- names(which.min(aics))
   
+  # Extract residuals of the best model for diagnostics
   best_model &lt;- switch(best_model_name,
                        &quot;ARMA(17,2)&quot; = model_17_2,
                        &quot;ARMA(12,3)&quot; = model_12_3,
                        &quot;ARMA(7,4)&quot;  = model_7_4)
   residuals_best &lt;- residuals(best_model)
   
-  # Step 6: Residual analysis
-  shapiro_p &lt;- tryCatch(shapiro.test(residuals_best)$p.value, error = function(e) NA)
-  boxljung_p &lt;- tryCatch(Box.test(residuals_best, lag=20, type=&quot;Ljung-Box&quot;)$p.value, error = function(e) NA)
-  archtest_p &lt;- tryCatch(ArchTest(residuals_best, lags=12)$p.value, error = function(e) NA)
+  # Run diagnostic tests on residuals
+  shapiro_p &lt;- tryCatch(shapiro.test(residuals_best)$p.value, error = function(e) NA)  # Normality
+  boxljung_p &lt;- tryCatch(Box.test(residuals_best, lag = 20, type = &quot;Ljung-Box&quot;)$p.value, error = function(e) NA)  # Autocorrelation
+  archtest_p &lt;- tryCatch(ArchTest(residuals_best, lags = 12)$p.value, error = function(e) NA)  # Heteroskedasticity
   
-  # Plot residuals and boxplot
-  png(filename=paste0(&quot;Stock_Plots/&quot;, stock, &quot;_Residuals.png&quot;))
-  par(mfrow=c(1,2))
-  ts.plot(residuals_best, main=paste(&quot;Residuals -&quot;, stock))
-  boxplot(residuals_best, main=paste(&quot;Boxplot of Residuals -&quot;, stock))
+  # Plot residuals time series and boxplot
+  png(filename = paste0(&quot;Stock_Plots/&quot;, stock, &quot;_Residuals.png&quot;))
+  par(mfrow = c(1, 2))
+  ts.plot(residuals_best, main = paste(&quot;Residuals -&quot;, stock))
+  boxplot(residuals_best, main = paste(&quot;Boxplot of Residuals -&quot;, stock))
   dev.off()
   
-  # Plot Histogram instead of QQ plot
-  png(filename=paste0(&quot;Stock_Plots/&quot;, stock, &quot;_Histogram.png&quot;))
-  hist(residuals_best, breaks=30, probability=TRUE, 
-       main=paste(&quot;Histogram of Residuals -&quot;, stock),
-       xlab=&quot;Residuals&quot;, col=&quot;lightblue&quot;, border=&quot;black&quot;)
-  lines(density(residuals_best), col=&quot;red&quot;, lwd=2)
+  # Plot histogram of residuals with density curve overlay
+  png(filename = paste0(&quot;Stock_Plots/&quot;, stock, &quot;_Histogram.png&quot;))
+  hist(residuals_best, breaks = 30, probability = TRUE,
+       main = paste(&quot;Histogram of Residuals -&quot;, stock),
+       xlab = &quot;Residuals&quot;, col = &quot;lightblue&quot;, border = &quot;black&quot;)
+  lines(density(residuals_best), col = &quot;red&quot;, lwd = 2)
   dev.off()
   
+  # Plot squared residuals to visualize volatility clustering
+  png(filename = paste0(&quot;Stock_Plots/&quot;, stock, &quot;_SquaredResiduals.png&quot;))
+  ts.plot(residuals_best^2, main = paste(&quot;Squared Residuals -&quot;, stock), ylab = &quot;Squared Residuals&quot;)
+  dev.off()
   
-  # Step 7: Save results
+  # Append results to summary dataframe
   results_summary &lt;- rbind(results_summary, data.frame(
     Stock = stock,
     Best_Model = best_model_name,
@@ -519,7 +526,7 @@ for (stock in stock_list) {
 <pre><code>## 
 ## Processing: Woodside Energy_stock_data.csv</code></pre>
 <pre><code>## Warning in log(s2): NaNs produced</code></pre>
-<pre class="r"><code># Final Step: Save everything
+<pre class="r"><code># Export summary of results for all stocks
 write.csv(results_summary, &quot;arma_modeling_results_summary.csv&quot;, row.names = FALSE)
 print(results_summary)</code></pre>
 <pre><code>##                                        Stock Best_Model  AIC_17_2  AIC_12_3
@@ -546,40 +553,6 @@ print(results_summary)</code></pre>
 ## ARMA(17,2)8  -18361.76   1.349153e-41       0.2290250   5.413333e-144
 ## ARMA(17,2)9  -16871.13   1.689382e-39       0.9535441   1.536768e-151
 ## ARMA(17,2)10 -20498.33   1.933583e-37       0.4340199   7.015319e-131</code></pre>
-<pre class="r"><code># 1. Data Processing
-#     For each stock, I separated the data into training (older points) and test (last ~80 points representing 2024).
-#     I used only the training data to fit the models.
-
-# 2. Model Selection
-#     Plotted ACF and PACF for each stock to observe correlation patterns.
-#     Fitted three ARMA models: ARMA(17,2), ARMA(12,3), ARMA(7,4).
-#     Chose the best model based on the lowest AIC.
-
-# 3. Residual Analysis
-#     Shapiro-Wilk Test checked for normality of residuals.
-#     Box-Ljung Test checked for no autocorrelation (good if p-value &gt; 0.05).
-#     ARCH Test checked for heteroskedasticity (constant variance).
-#
-#     In almost all cases:
-#         Residuals are not perfectly normal (p-values very small, expected for financial returns).
-#         No autocorrelation in residuals (Box-Ljung p-values mostly &gt; 0.95).
-#         Heteroskedasticity exists (very low ARCH p-values — again expected for stocks).
-
-# 4. Visuals
-#     Created plots for each stock:
-#     ACF + PACF plot of training data.
-
-# Residuals + Boxplot.
-#     All saved in the Stock_Plots/ folder.
-
-
-
-# Plot             | Good sign that model good      | Bad sign
-# ACF             | Bars die off fast               | Bars stay high for a long time
-# PACF            | Bars cut off cleanly            | Bars stay random everywhere
-# Residuals plot  | Random ups and downs around 0   | Patterns or waves
-# Boxplot         | Centered around 0               | Huge outliers or very uneven box
-# QQ plot         | Points on a straight line       | Points curve away, fat tails (but normal for stocks)</code></pre>
 
 
 
